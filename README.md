@@ -1454,6 +1454,12 @@ Dengan pengujian ini dapat dibuktikan bahwa `oblada` dan `molly` sama-sama berfu
 
 ## REVISI
 ---
+### No 6
+---
+Pada pengujian awal, serial SOA pada prab dan tedd berbeda karena tedd masih menyimpan salinan zona dengan serial yang lebih tinggi dibandingkan master prab. Kondisi ini menyebabkan slave menganggap data yang dimilikinya lebih baru sehingga tidak langsung melakukan sinkronisasi. Setelah serial pada prab dinaikkan dan dilakukan reload serta refresh pada tedd, kedua server memiliki serial SOA yang sama dan zona berhasil tersinkronisasi.
+
+<img width="666" height="66" alt="image" src="https://github.com/user-attachments/assets/2bf9f2c6-6967-490a-8bdf-425173a5f4a6" />
+
 ### No 9
 ---
 Pengujian dilakukan melalui hostname vault.k56.com menggunakan Lynx. Halaman Index of / berhasil tampil beserta daftar file di dalam direktori, sehingga layanan Apache dan fitur autoindex telah berjalan dengan benar.
@@ -1465,6 +1471,9 @@ lynx http://vault.k56.com/
 ### No 10
 ---
 Pengujian dilakukan melalui hostname core.k56.com menggunakan Lynx. Halaman beranda dan halaman profil berhasil diakses, termasuk URL bersih /profil tanpa akhiran .php, sehingga konfigurasi Nginx, PHP-FPM, dan rewrite telah berjalan dengan benar.
+```
+lynx http://core.k56.com/
+```
 
 #### Oblada
 <img width="744" height="291" alt="image" src="https://github.com/user-attachments/assets/1e8165ae-e014-4262-8699-a7baa9aaa66f" />
