@@ -1451,6 +1451,852 @@ Dokumentasi tambahan pengujian:
 Dengan pengujian ini dapat dibuktikan bahwa `oblada` dan `molly` sama-sama berfungsi sebagai backend untuk hostname `core.k56.com`.
 
 
+## 11. Reverse Proxy
+
+### Tujuan
+
+Konfigurasi reverse proxy dilakukan agar request dari client diteruskan melalui server proxy menuju server backend.
+
+Pada konfigurasi ini:
+
+* **Penny** berfungsi sebagai reverse proxy untuk layanan **Vault**.
+* **Abbey** berfungsi sebagai reverse proxy untuk layanan **Core**.
+* Header `Host` dipertahankan.
+* IP client diteruskan melalui header `X-Real-IP`.
+
+### Konfigurasi Penny
+
+Penny menggunakan Apache sebagai reverse proxy menuju backend Vault:
+
+```apache
+<VirtualHost *:80>
+    ServerName penny.k56.com
+
+    ProxyPreserveHost On
+
+    <Proxy "balancer://vault">
+        BalancerMember http://192.239.1.4
+        BalancerMember http://192.239.1.5
+        ProxySet lbmethod=byrequests
+    </Proxy>
+
+    ProxyPass / balancer://vault/
+    ProxyPassReverse / balancer://vault/
+
+    RequestHeader set X-Real-IP "%{REMOTE_ADDR}e"
+</VirtualHost>
+```
+
+Backend Vault terdiri dari:
+
+* `obladi` → `192.239.1.4`
+* `desmond` → `192.239.1.5`
+
+### Konfigurasi Abbey
+
+Abbey menggunakan Nginx sebagai reverse proxy menuju backend Core:
+
+```nginx
+location / {
+    proxy_pass http://192.239.1.6;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+}
+```
+
+Backend Core berada pada server `192.239.1.6`.
+
+### Pengujian Penny
+
+Dari node client, jalankan:
+
+```bash
+curl -i http://www.k56.com/
+```
+
+Jika reverse proxy Penny berhasil, `curl` akan mendapatkan response dari backend Vault melalui Penny.
+
+Untuk memastikan request diteruskan ke backend, dapat dilakukan pengecekan pada log Apache backend:
+
+```bash
+tail -f /var/log/apache2/access.log
+```
+
+Kemudian jalankan kembali:
+
+```bash
+curl http://www.k56.com/
+```
+
+Jika request tercatat pada log backend, berarti request telah diteruskan oleh Penny.
+
+### Pengujian Abbey
+
+Dari node client:
+
+```bash
+curl -i http://static.k56.com/
+```
+
+Jika reverse proxy Abbey berhasil, response dari backend Core akan diteruskan kepada client melalui Abbey.
+
+Pengecekan juga dapat dilakukan pada log backend untuk memastikan request diteruskan:
+
+```bash
+tail -f /var/log/nginx/access.log
+```
+
+Kemudian jalankan:
+
+```bash
+curl http://static.k56.com/
+```
+
+### Hasil
+
+![alt text](assets/11.png)
+
+Reverse proxy berhasil dikonfigurasi. Request menuju `www.k56.com` diteruskan oleh Penny menuju backend Vault, sedangkan request menuju `static.k56.com` diteruskan oleh Abbey menuju backend Core. Header `Host` dan `X-Real-IP` juga diteruskan sesuai konfigurasi.
+
+
+## 12. Basic Authentication pada Directory `/admin`
+
+### Tujuan
+
+Konfigurasi ini bertujuan untuk memberikan autentikasi pada directory `/admin`, sehingga halaman tersebut hanya dapat diakses oleh pengguna yang memiliki username dan password yang benar.
+
+### Konfigurasi
+
+Pada server **Penny**, dibuat file password menggunakan `htpasswd`:
+
+```bash
+htpasswd -c /etc/apache2/.htpasswd admin
+```
+
+Kemudian konfigurasi Apache pada directory `/admin`:
+
+```apache
+<Location /admin>
+    AuthType Basic
+    AuthName "Restricted Area"
+    AuthUserFile /etc/apache2/.htpasswd
+    Require valid-user
+</Location>
+```
+
+Setelah konfigurasi selesai, Apache direstart:
+
+```bash
+service apache2 restart
+```
+
+### Pengujian
+
+Pengujian dilakukan dari node client menggunakan `curl`.
+
+Pertama, akses `/admin` tanpa username dan password:
+
+```bash
+curl -i http://www.k56.com/admin
+```
+
+Jika Basic Authentication berhasil, response akan menunjukkan:
+
+```text
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Basic realm="Restricted Area"
+```
+
+Selanjutnya, lakukan akses menggunakan username dan password yang telah dibuat:
+
+```bash
+curl -i -u admin:PASSWORD http://www.k56.com/admin
+```
+
+Jika kredensial benar, server akan memberikan response **200 OK** dan halaman `/admin` dapat diakses.
+
+Untuk menguji kredensial yang salah:
+
+```bash
+curl -i -u admin:salah http://www.k56.com/admin
+```
+
+Response yang diharapkan:
+
+```text
+HTTP/1.1 401 Unauthorized
+```
+
+### Hasil
+
+![alt text](assets/12.png)
+![alt text](assets/12.1.png)
+![alt text](assets/12.2.png)
+
+Basic Authentication berhasil diterapkan pada directory `/admin`. Akses tanpa kredensial atau dengan kredensial yang salah menghasilkan **401 Unauthorized**, sedangkan kredensial yang benar dapat mengakses halaman `/admin`.
+
+
+## 13. HTTP Redirect
+
+### Tujuan
+
+Konfigurasi ini bertujuan untuk mengarahkan request dari URL tertentu menuju URL tujuan yang telah ditentukan menggunakan HTTP redirect.
+
+Redirect dilakukan agar ketika client mengakses URL lama, server memberikan response redirect dan client diarahkan ke URL yang baru.
+
+### Konfigurasi
+
+Pada server yang digunakan, dibuat konfigurasi redirect menggunakan directive Apache:
+
+```apache id="j4f7pa"
+Redirect 301 /old-url http://www.k56.com/
+```
+
+Kode status **301** menunjukkan bahwa URL tersebut telah dipindahkan secara permanen.
+
+Setelah konfigurasi selesai, Apache direstart:
+
+```bash id="c7f1pz"
+service apache2 restart
+```
+
+### Pengujian
+
+Pengujian dilakukan dari node client menggunakan `curl` dengan opsi `-I` untuk melihat HTTP response header:
+
+```bash id="9tvh5x"
+curl -I http://www.k56.com/old-url
+```
+
+Jika redirect berhasil, response akan menunjukkan:
+
+```text id="g1d5kh"
+HTTP/1.1 301 Moved Permanently
+Location: http://www.k56.com/
+```
+
+Untuk mengikuti redirect secara otomatis, gunakan:
+
+```bash id="gkqf2s"
+curl -IL http://www.k56.com/old-url
+```
+
+Opsi `-L` membuat `curl` mengikuti URL yang terdapat pada header `Location`.
+
+### Hasil
+
+![alt text](assets/13.png)
+
+HTTP redirect berhasil dikonfigurasi. Ketika client mengakses URL sumber, server memberikan response **301 Moved Permanently** dan mengarahkan client menuju URL tujuan melalui header `Location`.
+
+
+## 14. Forward Original Client IP
+
+### Tujuan
+
+Konfigurasi ini bertujuan agar IP asli client tetap dapat diteruskan dari reverse proxy menuju server backend.
+
+Tanpa konfigurasi ini, backend hanya akan melihat IP reverse proxy sebagai sumber request. Dengan meneruskan header `X-Real-IP`, backend dapat mengetahui IP client yang sebenarnya.
+
+### Konfigurasi Penny
+
+Pada server **Penny**, header `X-Real-IP` diteruskan menggunakan Apache:
+
+```apache id="h6v5sa"
+RequestHeader set X-Real-IP "%{REMOTE_ADDR}e"
+```
+
+Module `headers` harus aktif:
+
+```bash id="d8n4pe"
+a2enmod headers
+```
+
+Kemudian Apache direstart:
+
+```bash id="t8cj0k"
+service apache2 restart
+```
+
+### Konfigurasi Backend
+
+Pada server backend Apache, konfigurasi `mod_remoteip` digunakan agar Apache membaca IP client dari header `X-Real-IP`.
+
+```apache id="j0c8pp"
+RemoteIPHeader X-Real-IP
+RemoteIPTrustedProxy 192.239.3.2
+```
+
+`192.239.3.2` merupakan alamat IP Penny.
+
+Kemudian konfigurasi Apache direload/restart:
+
+```bash id="s5qv2a"
+service apache2 restart
+```
+
+### Pengujian
+
+Dari node client, lakukan request menggunakan:
+
+```bash id="q5f7ny"
+curl -i http://www.k56.com/
+```
+
+Kemudian periksa access log pada backend Vault:
+
+```bash id="m6v0ru"
+tail -f /var/log/apache2/access.log
+```
+
+Jalankan kembali request dari client:
+
+```bash id="9l7q3b"
+curl http://www.k56.com/
+```
+
+Pada log backend, alamat IP yang tercatat seharusnya merupakan **IP asli client**, bukan IP Penny (`192.239.3.2`).
+
+Untuk memastikan header diteruskan, konfigurasi Penny juga dapat diperiksa dengan:
+
+```bash id="y6z1re"
+grep -n "X-Real-IP" /etc/apache2/sites-enabled/penny.conf
+```
+
+### Hasil
+
+![alt text](assets/14.png)
+
+Konfigurasi berhasil meneruskan IP asli client melalui header `X-Real-IP`. Server backend dapat memperoleh alamat IP client asli meskipun request terlebih dahulu melewati reverse proxy Penny.
+
+
+
+## 15. Path-Specific Web Service
+
+### Tujuan
+
+Konfigurasi ini bertujuan untuk menyediakan layanan web pada path tertentu yang berbeda dari layanan utama.
+
+Pada konfigurasi ini:
+
+* **Penny** menyediakan halaman pada path `/eternal/` dari directory `/var/www/eternal/` dan mendukung PHP.
+* **Abbey** menyediakan halaman pada path `/orion/` dari directory `/var/www/orion/`.
+
+### Konfigurasi Penny
+
+Pada server Penny, path `/eternal/` diarahkan ke directory lokal:
+
+```apache
+Alias /eternal/ /var/www/eternal/
+
+<Directory /var/www/eternal/>
+    Options Indexes FollowSymLinks
+    AllowOverride None
+    Require all granted
+</Directory>
+```
+
+Path `/eternal/` harus dikecualikan dari konfigurasi reverse proxy utama agar request tidak diteruskan ke backend Vault:
+
+```apache
+ProxyPass /eternal/ !
+```
+
+Konfigurasi PHP juga digunakan agar file PHP pada directory tersebut dapat diproses oleh Apache.
+
+Setelah konfigurasi selesai:
+
+```bash
+service apache2 restart
+```
+
+### Konfigurasi Abbey
+
+Pada server Abbey, dibuat directory:
+
+```bash
+mkdir -p /var/www/orion
+```
+
+Kemudian path `/orion/` diarahkan ke directory tersebut:
+
+```nginx
+location /orion/ {
+    alias /var/www/orion/;
+    index index.html;
+}
+```
+
+Setelah konfigurasi selesai:
+
+```bash
+service nginx restart
+```
+
+### Pengujian Penny
+
+Dari node client, jalankan:
+
+```bash
+curl -i http://www.k56.com/eternal/
+```
+
+Untuk melihat isi halaman:
+
+```bash
+curl http://www.k56.com/eternal/
+```
+
+Response harus menampilkan konten dari `/var/www/eternal/`.
+
+Jika terdapat file PHP, PHP harus diproses oleh server dan **bukan menampilkan source code PHP**.
+
+### Pengujian Abbey
+
+Dari node client:
+
+```bash
+curl -i http://static.k56.com/orion/
+```
+
+Kemudian:
+
+```bash
+curl http://static.k56.com/orion/
+```
+
+Response harus menampilkan konten dari `/var/www/orion/`.
+
+### Hasil
+
+![alt text](assets/15.png)
+
+Path `/eternal/` pada Penny berhasil menyediakan layanan web lokal dengan dukungan PHP tanpa diteruskan ke backend Vault. Path `/orion/` pada Abbey berhasil menyediakan layanan web dari directory `/var/www/orion/`.
+
+
+## 16. Pengujian Web Server dengan ApacheBench
+
+### Tujuan
+
+Pengujian ini bertujuan untuk mengetahui kemampuan web server dalam menangani sejumlah request HTTP secara bersamaan menggunakan ApacheBench (`ab`).
+
+### Instalasi ApacheBench
+
+Pada node client, install package `apache2-utils`:
+
+```bash
+apt update
+apt install -y apache2-utils
+```
+
+Kemudian pastikan ApacheBench sudah tersedia:
+
+```bash
+ab -V
+```
+
+### Pengujian `www.k56.com`
+
+Pengujian dilakukan dengan mengirimkan **250 request** menggunakan **10 concurrent request**:
+
+```bash
+ab -n 250 -c 10 http://www.k56.com/
+```
+
+Keterangan:
+
+* `-n 250` → jumlah total request sebanyak 250.
+* `-c 10` → maksimal 10 request dijalankan secara bersamaan.
+* `http://www.k56.com/` → URL yang diuji.
+
+Hasil pengujian menunjukkan:
+
+```text
+Complete requests:      250
+Failed requests:        0
+```
+
+Artinya seluruh request berhasil diproses tanpa kegagalan.
+
+### Pengujian `static.k56.com`
+
+Pengujian kedua dilakukan pada layanan static:
+
+```bash
+ab -n 250 -c 10 http://static.k56.com/
+```
+
+Hasil pengujian menunjukkan:
+
+```text
+Complete requests:      250
+Failed requests:        0
+```
+
+Artinya seluruh request juga berhasil diproses.
+
+### Hasil
+
+![alt text](assets/16.png)
+![alt text](assets/16.1.png)
+
+Berdasarkan pengujian ApacheBench, layanan `www.k56.com` dan `static.k56.com` mampu menangani 250 request dengan concurrency 10 tanpa failed request.
+Pengujian ini menunjukkan bahwa konfigurasi web server dan reverse proxy dapat menangani request HTTP secara normal pada beban pengujian yang diberikan.
+
+
+## 17. TXT Record
+
+### Tujuan
+
+Konfigurasi ini bertujuan untuk menambahkan **TXT record** pada domain `k56.com`. TXT record digunakan untuk menyimpan informasi berbentuk teks pada DNS.
+
+### Konfigurasi
+
+Pada DNS Master **Prab**, ditambahkan TXT record berikut pada zone `k56.com`:
+
+```bind id="r8v4qu"
+alpha    IN TXT "alpha"
+beta     IN TXT "beta"
+gamma    IN TXT "gamma"
+delta    IN TXT "delta"
+epsilon  IN TXT "epsilon"
+```
+
+Setelah melakukan perubahan zone, serial number dinaikkan dan konfigurasi diperiksa:
+
+```bash id="0t0o2d"
+named-checkconf
+```
+
+Kemudian periksa zone:
+
+```bash id="6j7q0a"
+named-checkzone k56.com /etc/bind/k56/k56.com
+```
+
+Jika hasilnya `OK`, reload BIND:
+
+```bash id="fj7n5m"
+service bind9 reload
+```
+
+### Pengujian
+
+Pengujian dilakukan dengan `dig` dari client atau node lain.
+
+Cek TXT record `alpha` melalui DNS Master:
+
+```bash id="y3x3p8"
+dig @192.239.1.2 alpha.k56.com TXT +noall +answer
+```
+
+Cek melalui DNS Slave:
+
+```bash id="g3a2k1"
+dig @192.239.1.3 alpha.k56.com TXT +noall +answer
+```
+
+Kemudian lakukan pengecekan untuk record lainnya:
+
+```bash id="6l7p9d"
+dig @192.239.1.3 beta.k56.com TXT +noall +answer
+dig @192.239.1.3 gamma.k56.com TXT +noall +answer
+dig @192.239.1.3 delta.k56.com TXT +noall +answer
+dig @192.239.1.3 epsilon.k56.com TXT +noall +answer
+```
+
+Response yang diharapkan memiliki bentuk:
+
+```text id="9a2w4j"
+alpha.k56.com.    IN    TXT    "alpha"
+```
+
+Begitu juga dengan `beta`, `gamma`, `delta`, dan `epsilon`.
+
+### Hasil
+
+![alt text](assets/17.png)
+
+TXT record berhasil ditambahkan pada DNS Master dan dapat di-resolve melalui DNS Slave. Kelima hostname menghasilkan nilai TXT sesuai dengan konfigurasi yang dibuat.
+
+
+## No. 18 - Pengujian TTL dan DNS Caching
+
+### Tujuan
+
+Melakukan pengujian terhadap mekanisme **TTL dan caching DNS** pada record `abbey.k56.com`.
+
+### Pengujian
+
+Cek terlebih dahulu record melalui DNS recursive:
+
+```bash
+dig @192.168.122.1 abbey.k56.com A +noall +answer
+```
+
+Kemudian cek langsung ke DNS master:
+
+```bash
+dig @192.239.1.2 abbey.k56.com A +noall +answer
+```
+
+Setelah melakukan perubahan record dan menaikkan serial zone, reload DNS:
+
+```bash
+service bind9 reload
+```
+
+Cek kembali record pada DNS master:
+
+```bash
+dig @192.239.1.2 abbey.k56.com A +noall +answer
+```
+
+Kemudian cek melalui recursive resolver:
+
+```bash
+dig @192.168.122.1 abbey.k56.com A +noall +answer
+```
+
+Jika data lama masih tersimpan pada cache, recursive resolver masih dapat memberikan IP lama. Setelah TTL habis, lakukan query kembali:
+
+```bash
+dig @192.168.122.1 abbey.k56.com A +noall +answer
+```
+
+Resolver kemudian akan mengambil data terbaru dari DNS authoritative.
+
+### Hasil
+
+![alt text](assets/18.png)
+
+DNS master langsung memberikan record terbaru, sedangkan recursive resolver dapat mempertahankan record lama selama TTL masih berlaku. Setelah TTL habis, resolver memperbarui data dari DNS authoritative.
+
+### Catatan
+
+Konfigurasi perubahan pada No. 18 **diabaikan untuk No. 20**. Setelah pengujian selesai, `abbey.k56.com` harus dikembalikan ke:
+
+```text
+192.239.2.2
+```
+
+
+## No. 19 - CNAME Record ke Domain Eksternal
+
+### Tujuan
+
+Membuat **CNAME record** `outbound.k56.com` yang mengarah ke domain eksternal `http.badssl.com`.
+
+### Konfigurasi
+
+Pada zone `k56.com` di DNS master (`prab`), tambahkan:
+
+```bind
+outbound    IN    CNAME    http.badssl.com.
+```
+
+Setelah melakukan perubahan, naikkan **serial number** pada SOA kemudian cek konfigurasi:
+
+```bash
+named-checkconf
+named-checkzone k56.com /etc/bind/k56/k56.com
+```
+
+Jika konfigurasi valid, reload DNS:
+
+```bash
+service bind9 reload
+```
+
+### Pengujian DNS
+
+Cek CNAME pada DNS master:
+
+```bash
+dig @192.239.1.2 outbound.k56.com CNAME +noall +answer
+```
+
+Cek pada DNS slave:
+
+```bash
+dig @192.239.1.3 outbound.k56.com CNAME +noall +answer
+```
+
+Cek melalui recursive resolver:
+
+```bash
+dig @192.168.122.1 outbound.k56.com CNAME +noall +answer
+```
+
+Hasil yang diharapkan:
+
+```text
+outbound.k56.com.    ...    IN    CNAME    http.badssl.com.
+```
+
+Kemudian cek resolusi alamat IP:
+
+```bash
+dig @192.168.122.1 outbound.k56.com A +noall +answer
+```
+
+### Pengujian HTTP
+
+Lakukan request menggunakan `curl`:
+
+```bash
+curl http://outbound.k56.com
+```
+
+Request tersebut menggunakan `outbound.k56.com`, tetapi DNS akan mengarahkannya melalui CNAME ke `http.badssl.com`.
+
+### Kesimpulan
+
+CNAME `outbound.k56.com` berhasil dibuat dengan tujuan `http.badssl.com`. Keberhasilan konfigurasi dapat dibuktikan melalui hasil `dig` yang menunjukkan CNAME tersebut, kemudian akses HTTP diuji menggunakan `curl`.
+
+**Catatan:** Jika `curl` menghasilkan halaman blokir dari jaringan/filter eksternal, hal tersebut belum tentu berarti CNAME gagal. Pastikan terlebih dahulu hasil `dig` menunjukkan:
+
+```text
+outbound.k56.com.    IN    CNAME    http.badssl.com.
+```
+
+![alt text](assets/19.png)
+
+
+## No. 20 - Pengujian Service dan Autostart Setelah Restart
+
+### Tujuan
+
+Memastikan seluruh service dan konfigurasi yang telah dibuat tetap berjalan dengan normal dan **otomatis aktif setelah node di-restart**.
+
+Konfigurasi pada **No. 18 diabaikan** untuk pengujian ini.
+
+### 1. Pastikan Record Abbey Dikembalikan
+
+Pastikan `abbey.k56.com` kembali menggunakan IP normal:
+
+```text
+192.239.2.2
+```
+
+Cek dari DNS master:
+
+```bash
+dig @192.239.1.2 abbey.k56.com A +noall +answer
+```
+
+Hasil yang diharapkan:
+
+```text
+abbey.k56.com.    ...    IN    A    192.239.2.2
+```
+
+### 2. Restart Node
+
+Pada environment GNS3 yang digunakan, jika perintah `reboot` tidak tersedia, restart dilakukan melalui GNS3:
+
+1. Klik kanan node.
+2. Pilih **Stop**.
+3. Tunggu sampai node benar-benar berhenti.
+4. Pilih **Start**.
+5. Buka kembali console node.
+
+### 3. Cek Service Setelah Restart
+
+Pada **prab** dan **tedd**:
+
+```bash
+service bind9 status
+```
+
+Pada node yang menjalankan Apache:
+
+```bash
+service apache2 status
+```
+
+Pada node yang menjalankan Nginx:
+
+```bash
+service nginx status
+```
+
+Service harus langsung berjalan setelah node dinyalakan kembali tanpa menjalankan perintah `start` secara manual.
+
+### 4. Pengujian DNS
+
+Cek DNS master:
+
+```bash
+dig @192.239.1.2 www.k56.com A +noall +answer
+```
+
+Cek DNS slave:
+
+```bash
+dig @192.239.1.3 www.k56.com A +noall +answer
+```
+
+Cek record `abbey`:
+
+```bash
+dig @192.239.1.2 abbey.k56.com A +noall +answer
+```
+
+Hasil `abbey.k56.com` harus kembali:
+
+```text
+192.239.2.2
+```
+
+### 5. Pengujian Web
+
+Uji web melalui domain:
+
+```bash
+curl http://www.k56.com/
+```
+
+Uji static web:
+
+```bash
+curl http://static.k56.com/
+```
+
+Uji path khusus:
+
+```bash
+curl http://www.k56.com/eternal/
+```
+
+```bash
+curl http://static.k56.com/orion/
+```
+
+### 6. Pengujian CNAME
+
+Pastikan konfigurasi No. 19 tetap tersedia:
+
+```bash
+dig @192.239.1.2 outbound.k56.com CNAME +noall +answer
+```
+
+Hasil yang diharapkan:
+
+```text
+outbound.k56.com.    ...    IN    CNAME    http.badssl.com.
+```
+
+![alt text](assets/20.png)
+![alt text](assets/20.1.png)
+
+### Kesimpulan
+
+Setelah seluruh node direstart, dilakukan pengecekan terhadap service DNS, Apache, dan Nginx serta pengujian kembali konfigurasi DNS dan web. Jika service langsung aktif setelah node dinyalakan dan seluruh pengujian berhasil, maka konfigurasi telah berjalan secara **autostart** dan tetap persisten setelah restart.
+
+Konfigurasi eksperimen **No. 18 tidak digunakan** dalam pengujian akhir.
+
+
 
 ## REVISI
 ---
