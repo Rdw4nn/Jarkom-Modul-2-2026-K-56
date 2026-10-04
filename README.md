@@ -1449,3 +1449,29 @@ Dokumentasi tambahan pengujian:
 ![alt text](assets/modul2_10.6.png)
 
 Dengan pengujian ini dapat dibuktikan bahwa `oblada` dan `molly` sama-sama berfungsi sebagai backend untuk hostname `core.k56.com`.
+
+
+
+## REVISI
+---
+### No 9
+---
+Pengujian dilakukan melalui hostname vault.k56.com menggunakan Lynx. Halaman Index of / berhasil tampil beserta daftar file di dalam direktori, sehingga layanan Apache dan fitur autoindex telah berjalan dengan benar.
+```
+lynx http://vault.k56.com/
+```
+<img width="944" height="681" alt="image" src="https://github.com/user-attachments/assets/8a7ba27c-7ee4-46c2-9ab8-5db1337cf6c3" />
+
+### No 10
+---
+Pengujian dilakukan melalui hostname core.k56.com menggunakan Lynx. Halaman beranda dan halaman profil berhasil diakses, termasuk URL bersih /profil tanpa akhiran .php, sehingga konfigurasi Nginx, PHP-FPM, dan rewrite telah berjalan dengan benar.
+
+#### Oblada
+<img width="744" height="291" alt="image" src="https://github.com/user-attachments/assets/1e8165ae-e014-4262-8699-a7baa9aaa66f" />
+<img width="741" height="324" alt="image" src="https://github.com/user-attachments/assets/ab62d2f4-1c10-4ec5-8e18-2af095eefc21" />
+
+
+#### Molly
+<img width="745" height="450" alt="image" src="https://github.com/user-attachments/assets/3458c194-a098-4fcf-b6b1-aa819a0ff457" />
+<img width="751" height="299" alt="image" src="https://github.com/user-attachments/assets/7d0c805e-8018-4fc6-ad4a-9500019861b6" />
+
